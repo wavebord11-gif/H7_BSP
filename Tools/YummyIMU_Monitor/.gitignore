@@ -1,0 +1,4 @@
+node_modules/
+build_pyinstaller/
+__pycache__/
+*.spec

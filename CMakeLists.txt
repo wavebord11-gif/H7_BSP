@@ -95,7 +95,7 @@ target_compile_definitions(FreeRTOS PRIVATE
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
-    Middlewares/ST/ARM/DSP/Lib
+    Drivers/CMSIS/DSP/Lib/GCC
 )
 
 # Add sources to executable
@@ -134,6 +134,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/User_File/System/Init/Init.cpp
         ${CMAKE_CURRENT_LIST_DIR}/User_File/Task/InsTask.cpp
         ${CMAKE_CURRENT_LIST_DIR}/User_File/Task/TransportTask.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/User_File/Application/Communication/YummyIMU_Protocol.cpp
         ${CMAKE_CURRENT_LIST_DIR}/User_File/Task/CanTxTask.cpp
         ${CMAKE_CURRENT_LIST_DIR}/User_File/System/debug/sys_debug.cpp
         ${CMAKE_CURRENT_LIST_DIR}/User_File/Middleware/BSP/CAN/bsp_can.c
