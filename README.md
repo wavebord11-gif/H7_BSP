@@ -25,6 +25,16 @@ STM32H723ZG 板级支持包工程，面向 RoboMaster/机器人控制场景。�
 - 新增 Python 上位机源码、曲线与姿态显示、CSV 记录功能，以及可直接运行的 `H7_IMU_Studio_1.1.1.exe`。
 - 相关提交使用 `Co-authored-by: MermaidFAR <echo@marinaecho.space>` 标注 H7 BSP 原作者，并保留其他参考项目的作者信息。
 
+### BMI088 2 kHz 实时解算修复（2026-08-15）
+
+- 修复与验证：当前 Fork 维护者 [FLY_MCU / wavebord11-gif](https://github.com/wavebord11-gif)。
+- 基础工程与 BMI088/VQF 原始框架：[FAR / MermaidFAR](https://github.com/MermaidFAR)；原作者已有代码和设计归原作者所有。
+- 原问题：BMI088 内部以 2 kHz 产生陀螺仪样本，但 MCU 每约 4 ms 才轮询 FIFO，一次读取约 8 帧并连续解算。总帧率接近 2 kHz，但姿态输出存在批量更新和约 3.5～4 ms 的最老样本等待。
+- 修复方式：FIFO watermark 调整为 1 帧；TIM8 配置为 500 us 周期主动服务 FIFO；SPI DMA 回调只置位线程标志，由 `BMI088Task` 在任务上下文安全续传并逐帧执行 VQF，避免 DMA 回调内重入。
+- 启动修复：TIM8 在 `BMI088Task` 入口中启动，确保 FreeRTOS 内核和任务句柄已就绪，避免初始化阶段访问空任务句柄导致 HardFault。
+- 实测结果：DAP-Link 连续 1.0285 s 读取、入队和解算均增加 2054 帧，对应约 1997.1 Hz；样本周期约 500.0 us，队列丢帧、SPI 错误和传输超时均为 0。
+- 详细变更和验证数据见 [CHANGELOG.md](CHANGELOG.md#2026-08-15)。
+
 ## 贡献者与共同作者
 
 | 身份 | 作者账号 / 提交身份 | 相关内容 |
