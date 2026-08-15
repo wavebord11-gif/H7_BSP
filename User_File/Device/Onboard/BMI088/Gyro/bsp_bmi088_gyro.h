@@ -4,6 +4,7 @@
  * @brief BMI088组件之陀螺仪
  * @version 0.1
  * @date 2025-08-19 0.1 新建文档
+ * @date 2026-08-15 0.2 FIFO水位改为1帧，消除8帧批量读取造成的解算延迟
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -136,8 +137,8 @@ protected:
         {offsetof(Struct_BMI088_Gyro_Register, INT3_INT4_IO_CONF_RW), 0x0d},
         // FIFO watermark中断映射到INT3
         {offsetof(Struct_BMI088_Gyro_Register, INT3_INT4_IO_MAP_RW), 0x04},
-        // FIFO超过7帧时产生watermark中断, 即每8帧触发
-        {offsetof(Struct_BMI088_Gyro_Register, FIFO_CONFIG_0_RW), 0x07},
+        // FIFO存在1帧时即产生watermark中断, 每个2kHz样本独立触发
+        {offsetof(Struct_BMI088_Gyro_Register, FIFO_CONFIG_0_RW), 0x00},
         // FIFO stream模式, 满时保留最新99帧
         {offsetof(Struct_BMI088_Gyro_Register, FIFO_CONFIG_1_RW), 0x80},
         // 使能FIFO watermark中断
@@ -152,7 +153,7 @@ protected:
         BMI088_GYRO_FIFO_REQUEST_DATA,
     };
 
-    static constexpr uint8_t BMI088_GYRO_FIFO_WATERMARK_FRAME_COUNT = 8U;
+    static constexpr uint8_t BMI088_GYRO_FIFO_WATERMARK_FRAME_COUNT = 1U;
     static constexpr uint8_t BMI088_GYRO_FIFO_FRAME_SIZE = 6U;
     static constexpr uint8_t BMI088_GYRO_FIFO_MAX_READ_FRAME_COUNT =
         (SPI_BUFFER_SIZE - 1U) / BMI088_GYRO_FIFO_FRAME_SIZE;

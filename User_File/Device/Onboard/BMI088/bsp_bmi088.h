@@ -2,6 +2,9 @@
  * @file bsp_bmi088.h
  * @author zzm
  * @brief BMI088设备驱动与VQF姿态解算
+ * @version 0.2
+ * @date 2026-08-15 0.2 增加任务上下文FIFO续传标志与服务入口
+ * @date 2026-08-15 0.3 增加TIM8每500us单帧服务入口
  */
 
 #ifndef __BSP_BMI088_H
@@ -19,6 +22,11 @@ extern "C" {
 }
 
 /* Exported macros -----------------------------------------------------------*/
+
+static constexpr uint32_t BMI088_TASK_FLAG_SAMPLE_READY = 1U << 0;
+static constexpr uint32_t BMI088_TASK_FLAG_TRANSFER_SERVICE = 1U << 1;
+static constexpr uint32_t BMI088_TASK_FLAG_ALL =
+    BMI088_TASK_FLAG_SAMPLE_READY | BMI088_TASK_FLAG_TRANSFER_SERVICE;
 
 /* Exported types ------------------------------------------------------------*/
 
@@ -81,7 +89,9 @@ public:
     void SPI_RxCpltCallback();
     void EXTI_Flag_Callback(uint16_t __GPIO_Pin);
     void TIM_128ms_Calculate_PeriodElapsedCallback();
+    void TIM_500us_Service_PeriodElapsedCallback();
     void TIM_1ms_Service_PeriodElapsedCallback();
+    void Task_Service_Transfer();
 
     inline Class_Matrix_f32<3, 1> Get_Original_Accel() const;
     inline Class_Matrix_f32<3, 1> Get_Original_Gyro() const;

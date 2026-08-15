@@ -4,6 +4,8 @@
  * @brief BMI088组件之加速度计, 内含加热电阻
  * @version 0.1
  * @date 2025-08-26 0.1 新建文档
+ * @date 2026-08-15 0.2 FIFO后续传输改由BMI088任务即时发起
+ * @date 2026-08-15 0.3 使用TIM8每500us发起陀螺仪单帧服务
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -321,12 +323,22 @@ void Class_BMI088::SPI_RxCpltCallback()
             if ((gyro_result &
                  BMI088_GYRO_SPI_RESULT_SAMPLES_QUEUED) != 0U)
             {
-                osThreadFlagsSet(BMI088TaskHandle, 0x0001);
+                osThreadFlagsSet(BMI088TaskHandle,
+                                 BMI088_TASK_FLAG_SAMPLE_READY);
             }
         }
     }
 
-    // 不再从 SPI 回调中发起新传输（DMA-in-DMA 竞态），由 EXTI/慢周期统一发起
+    if (Init_Finished_Flag &&
+        (Accel_Status.Ready_Flag || Gyro_Status.Ready_Flag ||
+         Temperature_Status.Ready_Flag))
+    {
+        // 当前事务结束后仍有传感器请求，交给BMI088任务立即续传。
+        osThreadFlagsSet(BMI088TaskHandle,
+                         BMI088_TASK_FLAG_TRANSFER_SERVICE);
+    }
+
+    // 不从SPI回调中重入DMA；通过线程标志在BMI088任务上下文即时续传。
 }
 
 /**
@@ -352,6 +364,13 @@ void Class_BMI088::EXTI_Flag_Callback(uint16_t GPIO_Pin)
     }
 
     BMI088_Service_Transfer();
+    if (Accel_Status.Ready_Flag || Gyro_Status.Ready_Flag ||
+        Temperature_Status.Ready_Flag)
+    {
+        // 若服务入口正被任务占用，保留待处理请求并在任务上下文再次调度。
+        osThreadFlagsSet(BMI088TaskHandle,
+                         BMI088_TASK_FLAG_TRANSFER_SERVICE);
+    }
 }
 
 /**
@@ -367,6 +386,13 @@ void Class_BMI088::TIM_128ms_Calculate_PeriodElapsedCallback()
     BMI088_Accel.TIM_128ms_Heater_PID_PeriodElapsedCallback();
 }
 
+void Class_BMI088::TIM_500us_Service_PeriodElapsedCallback()
+{
+    const uint64_t now_timestamp = SYS_Timestamp.Get_Now_Microsecond();
+    BMI088_Status_Mark_Ready_If_Clear(Gyro_Status, now_timestamp);
+    BMI088_Service_Transfer();
+}
+
 void Class_BMI088::TIM_1ms_Service_PeriodElapsedCallback()
 {
     const uint64_t now_timestamp = SYS_Timestamp.Get_Now_Microsecond();
@@ -376,6 +402,11 @@ void Class_BMI088::TIM_1ms_Service_PeriodElapsedCallback()
         BMI088_Status_Mark_Ready_If_Clear(Gyro_Status, now_timestamp);
     }
     BMI088_Service_Transfer(true);
+}
+
+void Class_BMI088::Task_Service_Transfer()
+{
+    BMI088_Service_Transfer();
 }
 
 void Class_BMI088::BMI088_Recover_SPI(uint8_t __Reason)
