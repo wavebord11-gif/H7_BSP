@@ -7,7 +7,7 @@ STM32H723ZG 板级支持包工程，面向 RoboMaster/机器人控制场景。�
 ### H7 BSP 原工程
 
 - 上游工程：[MermaidFAR/H7_BSP](https://github.com/MermaidFAR/H7_BSP)。
-- 原作者：Echo `<echo@marinaecho.space>`。
+- 原作者：FAR（GitHub：[MermaidFAR](https://github.com/MermaidFAR)；Git 提交身份：Echo `<echo@marinaecho.space>`）。
 - 原工程提供 STM32H723ZG 板级支持、FreeRTOS 任务框架、外设 BSP、BMI088 采集及 VQF 姿态解算等基础内容。原工程已有代码、注释和设计归原作者所有。
 
 ### YummyIMU 参考来源
@@ -22,7 +22,7 @@ STM32H723ZG 板级支持包工程，面向 RoboMaster/机器人控制场景。�
 - 新增独立的 `YummyIMU_Protocol` 通信模块，并在 `TransportTask` 中接入 USB CDC 遥测。
 - 新增加速度计、陀螺仪、静止判断、静止偏差和温度等 BMI088 扩展数据。
 - 新增 Python 上位机源码、曲线与姿态显示、CSV 记录功能，以及可直接运行的 `H7_IMU_Studio_1.1.1.exe`。
-- 相关提交使用 `Co-authored-by` 标注上述原作者，保留原项目来源与作者信息。
+- 相关提交使用 `Co-authored-by: MermaidFAR <echo@marinaecho.space>` 标注 H7 BSP 原作者，并保留其他参考项目的作者信息。
 
 当前工程已经不是纯 CubeMX 框架：系统初始化、回调分发、BMI088 姿态解算链路、DMA 可访问内存段、SystemView 集成、FreeRTOS 任务入口、CAN/UART BSP 均已接通。仍未完成的重点集中在通信传输任务、电源/ADC 的系统级接入、以及部分并发标志和边角问题收口。
 

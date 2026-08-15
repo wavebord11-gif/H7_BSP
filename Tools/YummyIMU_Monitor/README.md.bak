@@ -5,7 +5,7 @@
 ### H7 BSP 原工程内容
 
 - 上游工程：[MermaidFAR/H7_BSP](https://github.com/MermaidFAR/H7_BSP)。
-- 原作者：Echo `<echo@marinaecho.space>`。
+- 原作者：FAR（GitHub：[MermaidFAR](https://github.com/MermaidFAR)；Git 提交身份：Echo `<echo@marinaecho.space>`）。
 - STM32H723ZG 板级支持、FreeRTOS 任务框架、外设 BSP、BMI088 采集和 VQF 姿态解算等基础内容来自 H7 BSP 原工程。
 
 ### YummyIMU 参考内容
@@ -20,7 +20,7 @@
 - 新增独立 `YummyIMU_Protocol` 固件模块和 `TransportTask` USB CDC 接入。
 - 新增 BMI088 三轴加速度、校正后三轴角速度、VQF 静止判断、静止偏差和温度扩展数据。
 - 新增 Python 上位机、三维姿态、传感器曲线、静止计时、CSV 记录和可直接运行的 EXE。
-- 相关提交通过 `Co-authored-by` 标注 Echo 与 Yae Windows，原工程已有内容仍归相应原作者所有。
+- 相关提交通过 `Co-authored-by` 标注 MermaidFAR 与 Yae Windows，原工程已有内容仍归相应原作者所有。
 
 ## 功能
 
@@ -49,6 +49,7 @@
 
 ## 文件变更记录
 
+- 2026-08-15：将 H7 BSP 原作者显示名称修正为 FAR（GitHub：MermaidFAR），同时保留其 Git 提交身份 Echo。
 - 2026-08-15：区分 H7 BSP 原工程、YummyIMU 参考内容和当前仓库新增的上位机内容，并补充相关作者共同署名。
 - 2026-08-15：补充原工程作者、共同作者署名和 YummyIMU 参考来源。
 - 2026-08-15：创建 Electron 上位机，重点接入加速度计、陀螺仪和 VQF 静止判断；增加 CSV 导出与协议终端。
