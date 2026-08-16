@@ -2,8 +2,10 @@
  * @file bsp_bmi088_gyro.cpp
  * @author yssickjgd (1345578933@qq.com)
  * @brief BMI088组件之陀螺仪
- * @version 0.1
+ * @version 0.3
  * @date 2025-08-19 0.1 新建文档
+ * @date 2026-08-16 0.2 启用INT3上升沿并减少FIFO批次结束后的冗余状态读取
+ * @date 2026-08-16 0.3 多帧积压时将最新INT3时间戳锚定到批次最后一帧
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -136,6 +138,12 @@ void Class_BMI088_Gyro::Init()
         }
     }
 
+    // 明确配置INT3上升沿，避免CubeMX配置不同步后丢失每帧数据就绪中断。
+    GPIO_InitTypeDef gpio_init = {};
+    gpio_init.Pin = BMI088_GYRO__INTERRUPT_Pin;
+    gpio_init.Mode = GPIO_MODE_IT_RISING;
+    gpio_init.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(BMI088_GYRO__INTERRUPT_GPIO_Port, &gpio_init);
 }
 
 void Class_BMI088_Gyro::Start_FIFO_Acquisition()
@@ -278,10 +286,9 @@ uint8_t Class_BMI088_Gyro::SPI_RxCallback(const uint64_t &__Ready_Timestamp_Us)
             Vector_Raw_Gyro = gyro;
             Valid_Flag = valid;
 
+            // DRDY时间戳对应最新到达样本；忙窗口积压多帧时必须锚定批次末帧。
             const uint8_t anchor_frame_index =
-                FIFO_Batch_From_Interrupt
-                    ? BMI088_GYRO_FIFO_WATERMARK_FRAME_COUNT - 1U
-                    : FIFO_Batch_Total_Frame_Count - 1U;
+                FIFO_Batch_Total_Frame_Count - 1U;
             const int32_t frame_offset =
                 static_cast<int32_t>(FIFO_Batch_Processed_Frame_Count) + i -
                 static_cast<int32_t>(anchor_frame_index);
@@ -330,6 +337,8 @@ uint8_t Class_BMI088_Gyro::SPI_RxCallback(const uint64_t &__Ready_Timestamp_Us)
                     ? BMI088_GYRO_FIFO_MAX_READ_FRAME_COUNT
                     : remaining;
             FIFO_Request = BMI088_GYRO_FIFO_REQUEST_DATA;
+            FIFO_Followup_Request_Count++;
+            result |= BMI088_GYRO_SPI_RESULT_FOLLOWUP_REQUIRED;
         }
         else
         {
@@ -341,8 +350,6 @@ uint8_t Class_BMI088_Gyro::SPI_RxCallback(const uint64_t &__Ready_Timestamp_Us)
             FIFO_Request = BMI088_GYRO_FIFO_REQUEST_STATUS;
         }
 
-        FIFO_Followup_Request_Count++;
-        result |= BMI088_GYRO_SPI_RESULT_FOLLOWUP_REQUIRED;
         return result;
     }
 

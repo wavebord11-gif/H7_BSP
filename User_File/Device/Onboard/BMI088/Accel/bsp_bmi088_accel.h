@@ -2,8 +2,9 @@
  * @file bsp_bmi088_accel.h
  * @author yssickjgd (1345578933@qq.com)
  * @brief BMI088组件之加速度计, 内含加热电阻
- * @version 0.1
+ * @version 0.2
  * @date 2025-08-14 0.1 新建文档
+ * @date 2026-08-16 0.2 原始加速度读取增加中断保护，保证任务侧快照完整
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -222,7 +223,14 @@ inline bool Class_BMI088_Accel::Get_Valid_Flag() const
  */
 inline Class_Matrix_f32<3, 1> Class_BMI088_Accel::Get_Raw_Accel() const
 {
-    return (Vector_Raw_Accel);
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const Class_Matrix_f32<3, 1> accel = Vector_Raw_Accel;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return accel;
 }
 
 /**

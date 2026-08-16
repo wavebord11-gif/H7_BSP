@@ -2,9 +2,10 @@
  * @file bsp_bmi088_gyro.h
  * @author yssickjgd (1345578933@qq.com)
  * @brief BMI088组件之陀螺仪
- * @version 0.1
+ * @version 0.3
  * @date 2025-08-19 0.1 新建文档
  * @date 2026-08-15 0.2 FIFO水位改为1帧，消除8帧批量读取造成的解算延迟
+ * @date 2026-08-16 0.3 改用INT3每帧数据就绪中断，并保护原始数据与时间戳读取
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -135,16 +136,16 @@ protected:
         {offsetof(Struct_BMI088_Gyro_Register, GYRO_BANDWODTH_RW), 0x01 | 0x80},
         // INT3推挽高有效, 与MCU上升沿EXTI配置一致
         {offsetof(Struct_BMI088_Gyro_Register, INT3_INT4_IO_CONF_RW), 0x0d},
-        // FIFO watermark中断映射到INT3
-        {offsetof(Struct_BMI088_Gyro_Register, INT3_INT4_IO_MAP_RW), 0x04},
-        // FIFO存在1帧时即产生watermark中断, 每个2kHz样本独立触发
+        // 数据就绪中断映射到INT3, 每个2kHz样本独立触发
+        {offsetof(Struct_BMI088_Gyro_Register, INT3_INT4_IO_MAP_RW), 0x01},
+        // FIFO水位保留为1帧, 用于单帧读取和积压恢复
         {offsetof(Struct_BMI088_Gyro_Register, FIFO_CONFIG_0_RW), 0x00},
         // FIFO stream模式, 满时保留最新99帧
         {offsetof(Struct_BMI088_Gyro_Register, FIFO_CONFIG_1_RW), 0x80},
-        // 使能FIFO watermark中断
-        {offsetof(Struct_BMI088_Gyro_Register, FIFO_WM_EN_RW), 0x88},
-        // 由1ms服务任务每4ms轮询FIFO, 不依赖锁存中断边沿
-        {offsetof(Struct_BMI088_Gyro_Register, GYRO_INT_CTRL_RW), 0x00},
+        // 不使用FIFO watermark中断, 保持FIFO功能使能
+        {offsetof(Struct_BMI088_Gyro_Register, FIFO_WM_EN_RW), 0x08},
+        // 使能每帧数据就绪中断
+        {offsetof(Struct_BMI088_Gyro_Register, GYRO_INT_CTRL_RW), 0x80},
     };
 
     enum Enum_BMI088_Gyro_FIFO_Request : uint8_t
@@ -249,7 +250,14 @@ inline bool Class_BMI088_Gyro::Get_Valid_Flag() const
  */
 inline Class_Matrix_f32<3, 1> Class_BMI088_Gyro::Get_Raw_Gyro() const
 {
-    return (Vector_Raw_Gyro);
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const Class_Matrix_f32<3, 1> gyro = Vector_Raw_Gyro;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return gyro;
 }
 
 inline uint16_t Class_BMI088_Gyro::Get_Queue_Depth() const
@@ -315,7 +323,14 @@ inline float Class_BMI088_Gyro::Get_FIFO_Sample_Period_Us() const
 
 inline uint64_t Class_BMI088_Gyro::Get_FIFO_Last_Interrupt_Timestamp_Us() const
 {
-    return FIFO_Last_Interrupt_Timestamp_Us;
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const uint64_t timestamp_us = FIFO_Last_Interrupt_Timestamp_Us;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return timestamp_us;
 }
 
 #endif

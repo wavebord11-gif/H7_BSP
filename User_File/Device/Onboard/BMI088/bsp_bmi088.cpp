@@ -2,10 +2,12 @@
  * @file bsp_bmi088.cpp
  * @author yssickjgd (1345578933@qq.com)
  * @brief BMI088组件之加速度计, 内含加热电阻
- * @version 0.1
+ * @version 0.5
  * @date 2025-08-26 0.1 新建文档
  * @date 2026-08-15 0.2 FIFO后续传输改由BMI088任务即时发起
  * @date 2026-08-15 0.3 使用TIM8每500us发起陀螺仪单帧服务
+ * @date 2026-08-16 0.4 改用INT3数据就绪中断，增加2ms丢中断兜底与加速度防抖
+ * @date 2026-08-16 0.5 增加任务通知启动保护并修复兜底时间戳竞态
  *
  * @copyright USTC-RoboWalker (c) 2025
  *
@@ -27,6 +29,15 @@ extern "C" { extern osThreadId_t BMI088TaskHandle; }
 Class_BMI088 BSP_BMI088;
 
 /* Private function declarations ---------------------------------------------*/
+
+static void BMI088_Task_Flags_Set_If_Running(const uint32_t &Flags)
+{
+    // System_Init早于RTOS任务创建；内核运行前只保留Ready/队列状态，不发送任务通知。
+    if (BMI088TaskHandle != nullptr && osKernelGetState() == osKernelRunning)
+    {
+        (void) osThreadFlagsSet(BMI088TaskHandle, Flags);
+    }
+}
 
 static bool BMI088_Status_Update_Matches(const Struct_BMI088_Status &Status, const Struct_BMI088_Status &Shadow_Status)
 {
@@ -323,8 +334,8 @@ void Class_BMI088::SPI_RxCpltCallback()
             if ((gyro_result &
                  BMI088_GYRO_SPI_RESULT_SAMPLES_QUEUED) != 0U)
             {
-                osThreadFlagsSet(BMI088TaskHandle,
-                                 BMI088_TASK_FLAG_SAMPLE_READY);
+                BMI088_Task_Flags_Set_If_Running(
+                    BMI088_TASK_FLAG_SAMPLE_READY);
             }
         }
     }
@@ -334,8 +345,8 @@ void Class_BMI088::SPI_RxCpltCallback()
          Temperature_Status.Ready_Flag))
     {
         // 当前事务结束后仍有传感器请求，交给BMI088任务立即续传。
-        osThreadFlagsSet(BMI088TaskHandle,
-                         BMI088_TASK_FLAG_TRANSFER_SERVICE);
+        BMI088_Task_Flags_Set_If_Running(
+            BMI088_TASK_FLAG_TRANSFER_SERVICE);
     }
 
     // 不从SPI回调中重入DMA；通过线程标志在BMI088任务上下文即时续传。
@@ -368,8 +379,8 @@ void Class_BMI088::EXTI_Flag_Callback(uint16_t GPIO_Pin)
         Temperature_Status.Ready_Flag)
     {
         // 若服务入口正被任务占用，保留待处理请求并在任务上下文再次调度。
-        osThreadFlagsSet(BMI088TaskHandle,
-                         BMI088_TASK_FLAG_TRANSFER_SERVICE);
+        BMI088_Task_Flags_Set_If_Running(
+            BMI088_TASK_FLAG_TRANSFER_SERVICE);
     }
 }
 
@@ -386,17 +397,15 @@ void Class_BMI088::TIM_128ms_Calculate_PeriodElapsedCallback()
     BMI088_Accel.TIM_128ms_Heater_PID_PeriodElapsedCallback();
 }
 
-void Class_BMI088::TIM_500us_Service_PeriodElapsedCallback()
-{
-    const uint64_t now_timestamp = SYS_Timestamp.Get_Now_Microsecond();
-    BMI088_Status_Mark_Ready_If_Clear(Gyro_Status, now_timestamp);
-    BMI088_Service_Transfer();
-}
-
 void Class_BMI088::TIM_1ms_Service_PeriodElapsedCallback()
 {
+    const uint64_t last_interrupt_timestamp =
+        BMI088_Gyro.Get_FIFO_Last_Interrupt_Timestamp_Us();
     const uint64_t now_timestamp = SYS_Timestamp.Get_Now_Microsecond();
-    if ((now_timestamp - Gyro_FIFO_Last_Fallback_Poll_Timestamp) >= 4000U)
+    // 正常路径由2kHz INT3驱动；连续2ms没有中断时，每1ms轮询一次用于恢复。
+    if (now_timestamp >= last_interrupt_timestamp &&
+        (now_timestamp - last_interrupt_timestamp) >= 2000U &&
+        (now_timestamp - Gyro_FIFO_Last_Fallback_Poll_Timestamp) >= 1000U)
     {
         Gyro_FIFO_Last_Fallback_Poll_Timestamp = now_timestamp;
         BMI088_Status_Mark_Ready_If_Clear(Gyro_Status, now_timestamp);
@@ -406,7 +415,8 @@ void Class_BMI088::TIM_1ms_Service_PeriodElapsedCallback()
 
 void Class_BMI088::Task_Service_Transfer()
 {
-    BMI088_Service_Transfer();
+    // 任务上下文允许立即处理启动失败、HAL错误和传输超时恢复。
+    BMI088_Service_Transfer(true);
 }
 
 void Class_BMI088::BMI088_Recover_SPI(uint8_t __Reason)
@@ -670,11 +680,19 @@ void Class_BMI088::Calculate()
 
         if (accel_status_snapshot.Update_Flag)
         {
-            Vector_Pending_Accel = accel_snapshot;
-            Pending_Accel_Timestamp =
+            const uint64_t accel_timestamp =
                 BMI088_Status_Get_Update_Ready_Timestamp(accel_status_snapshot);
-            Pending_Accel_Valid = accel_valid_snapshot;
-            Accel_Observation_Pending = true;
+            const uint64_t accel_interval =
+                static_cast<uint64_t>(VQF_Config.Accel_D_T * 1000000.0f);
+            if (Pending_Accel_Timestamp == 0U || accel_interval == 0U ||
+                accel_timestamp / accel_interval !=
+                    Pending_Accel_Timestamp / accel_interval)
+            {
+                Vector_Pending_Accel = accel_snapshot;
+                Pending_Accel_Timestamp = accel_timestamp;
+                Pending_Accel_Valid = accel_valid_snapshot;
+                Accel_Observation_Pending = true;
+            }
             BMI088_Status_Clear_Update_If_Matches(Accel_Status, accel_status_snapshot);
         }
     }

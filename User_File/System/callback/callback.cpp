@@ -2,9 +2,10 @@
  * @file    callback.cpp
  * @brief   中断回调统一分发中心
  * @author  zzm
- * @version 1.1
+ * @version 1.2
  * @date    2026-04-09
  * @date    2026-08-15 接入TIM8的500us BMI088单帧服务
+ * @date    2026-08-16 BMI088改用INT3数据就绪中断，移除TIM8采集回调
  *
  * @details 本文件集中实现 HAL 弱回调的覆写与分发，
  *          包括 GPIO 外部中断(EXTI)、定时器(TIM)周期中断与 SPI 完成回调，
@@ -91,10 +92,6 @@ extern "C" void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
     else if (htim->Instance == TIM6)
     {
         Task1s_Callback();
-    }
-    else if (htim->Instance == TIM8)
-    {
-        BSP_BMI088.TIM_500us_Service_PeriodElapsedCallback();
     }
 }
 

@@ -2,9 +2,10 @@
  * @file bsp_bmi088.h
  * @author zzm
  * @brief BMI088设备驱动与VQF姿态解算
- * @version 0.2
+ * @version 0.4
  * @date 2026-08-15 0.2 增加任务上下文FIFO续传标志与服务入口
  * @date 2026-08-15 0.3 增加TIM8每500us单帧服务入口
+ * @date 2026-08-16 0.4 改用INT3数据就绪中断并增加姿态数据原子快照
  */
 
 #ifndef __BSP_BMI088_H
@@ -89,7 +90,6 @@ public:
     void SPI_RxCpltCallback();
     void EXTI_Flag_Callback(uint16_t __GPIO_Pin);
     void TIM_128ms_Calculate_PeriodElapsedCallback();
-    void TIM_500us_Service_PeriodElapsedCallback();
     void TIM_1ms_Service_PeriodElapsedCallback();
     void Task_Service_Transfer();
 
@@ -129,6 +129,9 @@ public:
     inline float Get_VQF_Accel_Correction_Rate() const;
 
 protected:
+    template<typename Data_Type>
+    inline Data_Type Get_Atomic_Copy(const Data_Type &__Data) const;
+
     Struct_SPI_Manage_Object *SPI_Manage_Object = nullptr;
 
     static constexpr uint32_t TRANSFERING_TIMEOUT = 1000U;
@@ -203,19 +206,32 @@ extern Class_BMI088 BSP_BMI088;
 
 /* Exported functions --------------------------------------------------------*/
 
+template<typename Data_Type>
+inline Data_Type Class_BMI088::Get_Atomic_Copy(const Data_Type &__Data) const
+{
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const Data_Type data = __Data;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return data;
+}
+
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Original_Accel() const
 {
-    return Vector_Original_Accel;
+    return Get_Atomic_Copy(Vector_Original_Accel);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Original_Gyro() const
 {
-    return Vector_Original_Gyro;
+    return Get_Atomic_Copy(Vector_Original_Gyro);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Fixed_Corrected_Gyro() const
 {
-    return Vector_Fixed_Corrected_Gyro;
+    return Get_Atomic_Copy(Vector_Fixed_Corrected_Gyro);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Fixed_Gyro_Offset() const
@@ -225,42 +241,42 @@ inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Fixed_Gyro_Offset() const
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Euler_Angle() const
 {
-    return Vector_Euler_Angle;
+    return Get_Atomic_Copy(Vector_Euler_Angle);
 }
 
 inline Class_Matrix_f32<3, 3> Class_BMI088::Get_Rotation_Matrix() const
 {
-    return Matrix_Rotation;
+    return Get_Atomic_Copy(Matrix_Rotation);
 }
 
 inline Class_Matrix_f32<4, 1> Class_BMI088::Get_Axis_Angle() const
 {
-    return Vector_Axis_Angle;
+    return Get_Atomic_Copy(Vector_Axis_Angle);
 }
 
 inline Class_Quaternion_f32 Class_BMI088::Get_Quaternion() const
 {
-    return Quarternion;
+    return Get_Atomic_Copy(Quarternion);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Accel_Body() const
 {
-    return Vector_Accel_Body;
+    return Get_Atomic_Copy(Vector_Accel_Body);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Gyro_Body() const
 {
-    return Vector_Gyro_Body;
+    return Get_Atomic_Copy(Vector_Gyro_Body);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Accel() const
 {
-    return Vector_Accel;
+    return Get_Atomic_Copy(Vector_Accel);
 }
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_Gyro() const
 {
-    return Vector_Gyro;
+    return Get_Atomic_Copy(Vector_Gyro);
 }
 
 inline float Class_BMI088::Get_Accel_Norm() const
@@ -330,7 +346,7 @@ inline float Class_BMI088::Get_D_T() const
 
 inline uint64_t Class_BMI088::Get_Calculating_Time() const
 {
-    return Calculating_Time;
+    return Get_Atomic_Copy(Calculating_Time);
 }
 
 inline uint32_t Class_BMI088::Get_VQF_Reset_Counter() const
@@ -340,7 +356,14 @@ inline uint32_t Class_BMI088::Get_VQF_Reset_Counter() const
 
 inline Class_Matrix_f32<3, 1> Class_BMI088::Get_VQF_Gyro_Bias() const
 {
-    return Filter_VQF.Get_Bias_Estimate();
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const Class_Matrix_f32<3, 1> bias = Filter_VQF.Get_Bias_Estimate();
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return bias;
 }
 
 inline float Class_BMI088::Get_VQF_Gyro_Bias_Sigma() const
@@ -355,7 +378,15 @@ inline bool Class_BMI088::Get_VQF_Rest_Detected() const
 
 inline Class_Matrix_f32<2, 1> Class_BMI088::Get_VQF_Relative_Rest_Deviation() const
 {
-    return Filter_VQF.Get_Relative_Rest_Deviation();
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const Class_Matrix_f32<2, 1> deviation =
+        Filter_VQF.Get_Relative_Rest_Deviation();
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return deviation;
 }
 
 inline float Class_BMI088::Get_VQF_Accel_Correction_Rate() const

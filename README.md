@@ -21,11 +21,21 @@ STM32H723ZG 板级支持包工程，面向 RoboMaster/机器人控制场景。�
 - 当前维护者：FLY_MCU / GitHub 用户 `wavebord11-gif`。
 - 新增独立的 `YummyIMU_Protocol` 通信模块，并在 `TransportTask` 中接入 USB CDC 遥测。
 - 新增加速度计、陀螺仪、静止判断、静止偏差和温度等 BMI088 扩展数据。
-- 修复 BMI088 陀螺仪 2 kHz 样本每约 4 ms 集中读取的问题，改为 TIM8 每 500 us 主动服务 FIFO，并由 BMI088Task 逐帧进行 VQF 解算。
+- 修复 BMI088 陀螺仪 2 kHz 样本每约 4 ms 集中读取的问题；当前由 INT3 每帧数据就绪中断驱动 FIFO，并由 BMI088Task 逐帧进行 VQF 解算。
 - 新增 Python 上位机源码、曲线与姿态显示、CSV 记录功能，以及可直接运行的 `H7_IMU_Studio_1.1.1.exe`。
 - 相关提交使用 `Co-authored-by: MermaidFAR <echo@marinaecho.space>` 标注 H7 BSP 原作者，并保留其他参考项目的作者信息。
 
-### BMI088 2 kHz 实时解算修复（2026-08-15）
+### BMI088 INT3 低延迟采集合并（2026-08-16）
+
+- 上游方案来源：H7 BSP 原作者 FAR / MermaidFAR 的提交 [`181ae15`](https://github.com/MermaidFAR/H7_BSP/commit/181ae15a2ed94873701c9376b0306f1be6e53766)，提供 INT3 数据就绪配置、关键数据原子读取和加速度观测防抖。
+- 当前合并：保留本分支 FIFO 队列、VQF 逐帧解算、命名线程标志和 SPI 超时恢复；INT3 改为每个 2 kHz 样本触发，TIM8 恢复原配置且不再参与 BMI088 采集。
+- 忙窗口保护：EXTI 遇到 SPI 正忙时保留 Ready 请求；任意 SPI DMA 完成后再次检查 pending Ready，并通知 `BMI088Task` 在任务上下文续传，避免等待下一次中断；积压多帧时以最新 INT3 时间戳锚定 FIFO 批次末帧。
+- 采集兜底：连续 2 ms 没有 INT3 时，1 ms 服务才启动 FIFO 轮询；时间戳比较已防止 EXTI 与定时器读取交错造成无符号下溢；正常中断路径不承担额外定时器采集开销。
+- 数据一致性：原始加速度、原始陀螺仪、姿态矩阵、四元数和 64 位时间字段使用短临界区复制；加速度观测按 4 ms 时间窗口去重。
+- 启动保护：`System_Init()` 早于任务创建，内核运行前只保留 Ready/队列状态，不向空句柄或未运行的 RTOS 发送线程标志。
+- 构建结果：GNU Arm 14.3.1 的 Debug `-Og -g3` 与 Release `-Os -g0` 均已完整编译和链接通过；INT3 帧率、FIFO 帧率和队列零丢帧仍需烧录后实测确认。
+
+### BMI088 2 kHz TIM8 过渡方案（2026-08-15，已实测）
 
 - 修复与验证：当前 Fork 维护者 [FLY_MCU / wavebord11-gif](https://github.com/wavebord11-gif)。
 - 基础工程与 BMI088/VQF 原始框架：[FAR / MermaidFAR](https://github.com/MermaidFAR)；原作者已有代码和设计归原作者所有。
@@ -55,7 +65,7 @@ GitHub 右侧的 `Contributors` 列表由平台根据默认分支提交自动生
 | MCU | 已配置 | STM32H723ZG，Flash 1024K，DTCMRAM/RAM_D1/RAM_D2/RAM_D3 分区已在链接脚本中定义 |
 | RTOS | 已接入 | FreeRTOS + CMSIS-RTOS V2；`heap_5` 的 64 KiB 后备区按 48 KiB DTCMRAM + 16 KiB RAM_D1 分区 |
 | SystemView | 已接入 | 使用 `User_Config/FreeRTOS_Patch/port_patched.c` 替换原始 FreeRTOS `port.c` |
-| BMI088 | 已形成 2 kHz 主链路 | TIM8 每 500 us 主动服务 FIFO；SPI DMA 完成后由线程标志通知 `BMI088Task` 续传并逐帧执行 VQF。DAP-Link 实测约 1997.1 Hz，无丢帧或传输超时 |
+| BMI088 | 已形成 2 kHz 低延迟主链路（待实测） | INT3 每帧数据就绪触发 FIFO 服务；SPI DMA 完成后由线程标志通知 `BMI088Task` 续传并逐帧执行 VQF；连续 2 ms 无中断时由 1 ms 服务兜底。TIM8 过渡方案曾实测约 1997.1 Hz，当前 INT3 版本需重新测量 |
 | DMA 缓冲区 | 已修复关键布局 | SPI/ADC 管理对象放入 `.dma_buffer`，链接到 RAM_D1，MPU 配置为 non-cacheable |
 | TransportTask | 骨架完成 | 当前只初始化 USB Device 并周期让出 CPU，尚无协议和数据收发 |
 | CAN/FDCAN BSP | 已实现 | `bsp_can` v2 双通道发送架构：周期通道（`CAN_Tx_Perform` + `BSP_CAN_SendPer`）+ 异步队列（`CAN_Tx_Submit` + `BSP_CAN_SendAsync`），`CanTxTask` 1ms 周期执行。已修复 FDCAN2 Message RAM 重叠（`MessageRAMOffset` 0→853，三路均匀三等分 0/853/1706）、`BSP_CAN_SendMsg` 缺 `len==0` 保护、`CanTxTask` 的 `vTaskDelayUntil` 周期写法（`xLastWakeTime` 移出循环）。待确认：FDCAN2 `AutoRetransmission=DISABLE` 与 FDCAN1/3 不一致 |
@@ -70,7 +80,7 @@ GitHub 右侧的 `Contributors` 列表由平台根据默认分支提交自动生
 | RAM_D2 | 0 B | 32 KB | 0.00% |
 | RAM_D3 | 0 B | 16 KB | 0.00% |
 | ITCMRAM | 0 B | 64 KB | 0.00% |
-| FLASH | 124496 B | 1024 KB | 11.87% |
+| FLASH | 124728 B | 1024 KB | 11.89% |
 
 ## 目录结构
 
@@ -97,19 +107,20 @@ User_Config/                  工具与补丁配置，包含 FreeRTOS 与链接�
 - `HAL_Init()`、系统时钟、公共外设时钟和 CubeMX 外设初始化依次完成，包括 GPIO、DMA、MDMA、FDCAN、SPI、UART、TIM、ADC 等。
 - `System_Init()` 在 RTOS 内核启动前执行，完成 SystemView、时间戳、EXTI 优先级、SPI2/SPI6 BSP 绑定、TIM5 启动和 BMI088 初始化。
 - `osKernelInitialize()` 后创建 `TransportTask` 与 `InsTask`。
-- `osKernelStart()` 启动调度器后，`BMI088Task` 将自身优先级提升到 `osPriorityHigh2`，再启动 TIM8 的 500 us 周期中断；这样可以确保任务句柄和 RTOS 内核均已就绪。
+- `osKernelStart()` 启动调度器后，`BMI088Task` 将自身优先级提升到 `osPriorityHigh2`，阻塞等待 FIFO 续传或样本就绪线程标志；TIM8 不再参与 BMI088 采集。
 
 当前的核心数据流：
 
 ```text
-TIM8 每 500 us 更新中断
-    -> HAL_TIM_PeriodElapsedCallback
-    -> BSP_BMI088.TIM_500us_Service_PeriodElapsedCallback
+BMI088 INT3 每帧数据就绪中断
+    -> HAL_GPIO_EXTI_Callback
+    -> BSP_BMI088.EXTI_Flag_Callback
     -> 读取 FIFO 状态并发起 SPI2 DMA
     -> HAL_SPI_TxRxCpltCallback
     -> SPI2_Callback
     -> BSP_BMI088.SPI_RxCpltCallback
-    -> 通过线程标志通知 BMI088Task 在任务上下文续传
+    -> SPI完成后检查pending Ready并置线程标志
+    -> BMI088Task在任务上下文续传
     -> FIFO 单帧样本入队后唤醒 BMI088Task
     -> BSP_BMI088.Calculate() 逐帧执行 VQF
 ```
@@ -211,7 +222,7 @@ cmake --build --preset Debug
 
 | 任务 | 优先级 | 栈大小 | 当前职责 |
 | --- | --- | ---: | --- |
-| `BMI088Task` | 初始 `osPriorityLow`，运行后提升为 `osPriorityHigh2` | `2048 * 4` 字节 | 启动 TIM8 500 us 服务，处理 FIFO 续传标志并逐帧执行 VQF 姿态解算 |
+| `BMI088Task` | 初始 `osPriorityLow`，运行后提升为 `osPriorityHigh2` | `2048 * 4` 字节 | 处理 INT3/SPI 产生的 FIFO 续传标志，并逐帧执行 VQF 姿态解算 |
 | `InsTask` | `osPriorityHigh1` | `2048 * 4` 字节 | INS 后续处理预留任务，当前保持阻塞等待 |
 | `CanTxTask` | `osPriorityHigh` | `1024 * 4` 字节 | 1ms 周期发送：先排空异步队列（`BSP_CAN_SendAsync`），再发送三路周期帧（`BSP_CAN_SendPer`） |
 | `TIM_1ms_Task` | `osPriorityLow` | — | 1ms 模式分频器：pulse() 调度 1ms/10ms/50ms/128ms 周期回调 |
@@ -313,10 +324,10 @@ enum Enum_Solve_Event
 `User_File/System/callback/callback.cpp` 当前提供统一 HAL 回调分发：
 
 - `HAL_GPIO_EXTI_Callback()`：过滤 BMI088 加速度计和陀螺仪数据就绪引脚，转交给 `BSP_BMI088.EXTI_Flag_Callback()`。
-- `HAL_TIM_PeriodElapsedCallback()`：保留 TIM2 HAL Tick 递增，TIM4 提供 1 ms 控制基准，TIM5 用于时间戳小时级溢出计数，TIM8 每 500 us 服务 BMI088 陀螺仪 FIFO。
+- `HAL_TIM_PeriodElapsedCallback()`：保留 TIM2 HAL Tick 递增，TIM4 提供 1 ms 控制基准，TIM5 用于时间戳小时级溢出计数；TIM8 不再分发 BMI088 采集回调。
 - `SPI2_Callback()`：根据 SPI2 当前片选目标判断本次传输属于 BMI088 加速度计还是陀螺仪，然后调用 `BSP_BMI088.SPI_RxCpltCallback()`。
 
-高频 10 us / 125 us 旧回调仍保持废弃。当前仅启用 2 kHz 的 TIM8 短中断发起 FIFO 服务，数据搬运由 SPI DMA 完成，后续传输和 VQF 运算均在 BMI088Task 中执行。
+高频 10 us / 125 us 旧回调仍保持废弃。当前由 BMI088 INT3 数据就绪中断发起 FIFO 服务，数据搬运由 SPI DMA 完成，后续传输和 VQF 运算均在 BMI088Task 中执行；1 ms 服务只负责超时恢复和连续 2 ms 无 INT3 时的兜底轮询。
 
 ### 时间戳系统
 
@@ -402,15 +413,15 @@ BMI088 是当前最完整的设备链路，由 `Class_BMI088` 管理加速度计
 - 芯片 ID 检测、软重启、寄存器配置确认。
 - 量程配置为 2000 dps。
 - 反馈频率配置为 2000 Hz，带宽 230 Hz。
-- FIFO watermark 配置为 1 帧；板上 INT3/EXTI 实测未触发，因此正常采集由 TIM8 每 500 us 主动服务。
+- FIFO 水位配置为 1 帧；INT3 映射为数据就绪中断并启用，每个 2 kHz 样本独立触发；PE12 明确配置为上升沿 EXTI。
 - 角速度原始值转换为 rad/s。
 - 数据合法性检查。
 
 BMI088 总控已实现：
 
-- 根据 EXTI 标记加速度计数据就绪，并由 TIM8 每 500 us 标记陀螺仪 FIFO 服务请求。
+- 根据 EXTI 标记加速度计和陀螺仪数据就绪，陀螺仪 INT3 作为正常采集时钟源。
 - 在没有 SPI 传输进行时按优先级发起读取请求。
-- SPI 完成回调中更新数据标志和时间戳；需要续传时仅置位 BMI088Task 线程标志。
+- SPI 完成回调中更新数据标志和时间戳；需要续传或仍有 pending Ready 时仅置位 BMI088Task 线程标志。
 - 单帧样本进入队列后通知 `BMI088Task`，任务循环排空队列并逐帧解算。
 - 不在 SPI 回调中重入新的 DMA 传输，避免 DMA-in-DMA 竞态；底层事务锁释放后由任务上下文续传。
 
@@ -424,8 +435,10 @@ BMI088 总控已实现：
 - 使用加速度方向初始化姿态，Yaw 初始为 0。
 - 每次计算根据 FIFO 样本微秒时间戳更新 `D_T`，名义周期为 0.0005 s。
 - 陀螺仪逐帧调用 VQF 更新；新的有效加速度观测到达时执行加速度修正。
+- 加速度观测按名义 4 ms 周期窗口去重，避免同一观测被多个 2 kHz 陀螺仪样本重复使用。
 - VQF 内部执行陀螺仪零偏估计、静止检测和姿态四元数更新。
 - 输出四元数、欧拉角、旋转矩阵、轴角、机体系/大地系加速度和角速度。
+- 上位机和调试任务读取原始 IMU、姿态矩阵、四元数及 64 位时间字段时使用短临界区原子快照，避免读到跨更新的混合数据。
 - 更新 Ozone Timeline Data Plot 使用的全局浮点数组。
 
 ### 算法库
@@ -502,14 +515,15 @@ Power 和 ADC 模块已在 `System_Init()` 中调用初始化：
 
 这说明定时器框架已经搭好，但周期任务调度策略还未最终收口。
 
-### 并发标志需要更严格语义
+### BMI088 并发访问处理
 
-中断和任务之间共享了一些状态标志。全局 `init_finished` 已改为 `volatile bool`，但 BMI088 内部仍有若干普通 `bool` 标志，例如：
+中断和任务之间共享 BMI088 状态。当前处理方式：
 
-- BMI088 内部的 `Init_Finished_Flag`。
-- Accel/Gyro/Temperature ready、transfering、update 标志。
+- Accel/Gyro/Temperature 的 ready、transfering、update 状态通过保存 `PRIMASK` 的短临界区读写。
+- 原始加速度、原始陀螺仪、姿态矩阵、四元数和 64 位时间字段在 getter 中原子复制。
+- SPI DMA 完成后检查所有 pending Ready，补上数据就绪中断落在 SPI 忙窗口时的续传调度。
 
-当前 Debug / `-O0` 下问题不明显，但这些变量跨 ISR 与任务上下文使用，后续建议根据访问路径改成 `volatile`、临界区保护、原子语义或 RTOS 同步对象。
+后续仍应审计单个标量 getter 与 `Init_Finished_Flag` 的跨上下文访问，但不应把高频采集路径改成长临界区或阻塞锁。
 
 ### SPI 边角问题
 
@@ -698,7 +712,7 @@ VS Code 工作区设置保留 `cmake.cmakePath = cube-cmake`，并显式绑定 `
 - 完成 `TransportTask` 的 USB CDC 或串口通信协议。
 - 接入 `ADC_Init()` 与 `BSP_Power.Init()`，让电源电压检测和 BMI088 温控有真实数据来源。
 - 决定 BMI088 加热器是否启用，并把 128 ms 温控周期接入回调或 RTOS timer。
-- 把 ISR/任务共享标志做并发语义收口。
+- 烧录后验证 INT3 中断、FIFO 读取、入队和解算消费均约 2000 次/秒，并确认丢帧、溢出、SPI 错误和超时计数不增长。
 - 对 SPI BSP 做一次系统性重构，降低重复分支和边界错误概率。
 - 对 `InsTask` 做栈水位观测，确认 EKF 在 Debug 和 Release 下的运行余量。
 

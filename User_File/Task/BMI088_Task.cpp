@@ -2,21 +2,21 @@
  * @file BMI088_Task.cpp
  * @brief BMI088 高优先级姿态解算任务。
  * @author zzm
- * @version 1.1
+ * @version 1.3
  * @date 2026-08-15 1.1 在任务上下文即时发起FIFO后续传输并逐帧解算
  * @date 2026-08-15 1.2 在任务与内核就绪后启动TIM8的500us服务
+ * @date 2026-08-16 1.3 改用INT3数据就绪中断，移除TIM8采集启动
  *
  * @details
- * 陀螺仪 SPI 接收回调在需要续传或FIFO样本入队后置位线程标志。本任务被唤醒后先在
- * 任务上下文发起后续DMA，再逐帧调用Calculate()清空队列，避免约2kHz的陀螺仪数据
- * 积压；完成解算后更新调试遥测数据。任务使用CMSIS-RTOS v2接口。
+ * INT3数据就绪中断发起首笔SPI DMA；接收回调在需要续传或FIFO样本入队后置位线程
+ * 标志。本任务被唤醒后先在任务上下文发起后续DMA，再逐帧调用Calculate()清空队列，
+ * 避免约2kHz的陀螺仪数据积压；完成解算后更新调试遥测数据。
  */
 
 /* Includes ------------------------------------------------------------------*/
 #include "user_task.h"
 #include "bsp_bmi088.h"
 #include "sys_debug.h"
-#include "tim.h"
 
 /* Private macros ------------------------------------------------------------*/
 
@@ -35,9 +35,6 @@
 extern "C" void BMI088_Task(void *argument) {
   // 姿态解算依赖高频陀螺仪数据，提升任务优先级以降低 FIFO 排队延迟。
   osThreadSetPriority(osThreadGetId(), osPriorityHigh2);
-  // 必须在任务句柄和RTOS内核就绪后启动，避免初始化阶段回调访问空句柄。
-  HAL_TIM_Base_Start_IT(&htim8);
-
   for (;;) {
     const uint32_t task_flags = osThreadFlagsWait(
         BMI088_TASK_FLAG_ALL, osFlagsWaitAny, osWaitForever);

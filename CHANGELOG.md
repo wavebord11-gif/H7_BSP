@@ -4,6 +4,29 @@
 
 格式遵循“日期 + 分类”的方式维护。当前项目尚未形成正式版本号，因此先使用日期条目。
 
+## 2026-08-16
+
+### 已修改
+
+- 参考 H7 BSP 原作者 FAR / MermaidFAR 的上游提交 `181ae15`，将 BMI088 陀螺仪正常采集路径从 TIM8 每 500 us 主动轮询改为 INT3 每帧数据就绪中断；保留本分支现有 FIFO 队列、VQF 逐帧解算、SPI 超时恢复和协议数据接口。
+- 将 `INT3_INT4_IO_MAP` 从 FIFO watermark 映射 `0x04` 改为数据就绪映射 `0x01`，`FIFO_WM_EN` 从 `0x88` 改为 `0x08`，`GYRO_INT_CTRL` 从 `0x00` 改为 `0x80`；FIFO 水位继续保持 1 帧。
+- 在 CubeMX 配置中明确 PE12 为上升沿 EXTI，并在陀螺仪初始化完成后再次调用 `HAL_GPIO_Init()`，避免 `.ioc` 配置不同步造成 INT3 不触发。
+- TIM8 恢复原始 `Prescaler = 0`、`Period = 125 - 1` 配置；移除 `BMI088Task` 中的 TIM8 启动和统一回调中心的 TIM8 BMI088 分支，TIM8 不再承担采集时钟。
+- 保留并加强本分支的 SPI 忙窗口处理：EXTI 服务后若仍有 Ready 请求则置续传标志；任意 SPI DMA 完成后再次检查 Accel/Gyro/Temperature pending Ready，由 `BMI088Task` 在事务锁释放后发起下一笔 DMA。
+- FIFO 已知批次全部读完后不再额外读取一次状态；只有批次仍有剩余帧时才发起后续数据 DMA，降低正常单帧路径的 SPI 开销。
+- 连续 2 ms 没有 INT3 时，1 ms 服务才按 1 ms 间隔轮询 FIFO，用于丢中断和 SPI 超时恢复；正常 2 kHz INT3 路径不依赖该兜底。
+- 修复忙窗口多帧积压的时间戳锚点：最新 INT3 时间戳对应 FIFO 批次末帧，避免把最旧帧误标为最新时间并造成后续时间戳前推。
+- 兜底比较先保存原子化的最后 INT3 时间戳，再读取当前时间并检查 `now >= last`，避免 EXTI 与定时器读取交错时发生无符号下溢。
+- `System_Init()` 早于 RTOS 任务创建，新增任务句柄和内核运行状态保护；调度器启动前 Ready/队列仍保留，启动后的下一帧会正常唤醒 `BMI088Task`。
+- 为原始加速度、原始陀螺仪、姿态矩阵、四元数、VQF 零偏/静止偏差和 64 位时间字段增加保存 `PRIMASK` 的短临界区复制，避免 ISR 与任务并发时读取到混合快照。
+- 加速度观测按配置的 4 ms 周期窗口去重，并对零周期增加除零保护，避免一帧加速度被连续多个 2 kHz 陀螺仪样本重复修正。
+
+### 构建与待验证
+
+- GNU Arm 14.3.1 的 Debug `-Og -g3` 与 Release `-Os -g0` 均完整编译和链接通过；Debug 输出为 `build/Debug/H7_BSP.elf`，DTCMRAM 104528 B、RAM_D1 33504 B、FLASH 124728 B；Release 输出为 `build/Release/H7_BSP.elf`，DTCMRAM 104520 B、RAM_D1 33504 B、FLASH 107472 B。
+- 本条目仅确认静态差异和构建结果，尚未把 INT3 版本写入板卡进行频率实测。烧录后应确认 `Gyro_FIFO_Interrupt_Count`、FIFO 帧读取、队列入队和消费均约 2000 次/秒，且 Drop、Overrun、SPI Error、Start Failure、Timeout 不增长。
+- 若 `Gyro_FIFO_Interrupt_Count` 仍为 0，应先检查 PE12/INT3 电气连接和寄存器回读；硬件确认仍无法触发时，再恢复 2026-08-15 已实测的 TIM8 500 us 方案。
+
 ## 2026-08-15
 
 ### 已修复
